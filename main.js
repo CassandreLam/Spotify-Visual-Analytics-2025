@@ -369,10 +369,20 @@ function updateLegend() {
     });
 }
 
+
 function highlightGroup(k) {
-    const key = currentMode==="genre"?"playlist_genre":"cluster_label";
+    const key = currentMode === "genre" ? "playlist_genre" : "cluster_label";
+
     scatterSelection.attr("opacity", 0.1); 
-    scatterSelection.filter(d => d[key]===k).attr("opacity", 1).attr("r", 5).raise();
+    scatterSelection.filter(d => d[key] === k).attr("opacity", 1).attr("r", 5).raise();
+
+    if(timelineLayers) {
+        timelineLayers.attr("opacity", 0.2).attr("stroke", "none");
+        timelineLayers.filter(d => d.key === k).attr("opacity", 1).attr("stroke", "#fff").attr("stroke-width", 1.5).raise();
+    }
+
+    const specificData = filteredData.filter(d => d[key] === k);
+    updateAnalytics(specificData);
 }
 
 function highlightTimelineLayer(key) {
@@ -395,5 +405,6 @@ function filterMapByTime(data) {
     const years = new Set(data.map(d=>d.year));
     scatterSelection.style("display", d=>years.has(d.year)?"block":"none");
 }
+
 
 init();
