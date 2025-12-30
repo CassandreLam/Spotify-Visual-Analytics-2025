@@ -1,28 +1,36 @@
 // js/main.js
 
+// --- CONFIGURATION ---
 const marginMap = {top: 10, right: 10, bottom: 20, left: 30};
 const marginTime = {top: 5, right: 10, bottom: 20, left: 30};
 const marginHist = {top: 10, right: 10, bottom: 30, left: 35}; 
 
+const ACCENT_COLOR = "#1DB954"; // Spotify Green forced
+
+// --- STATE ---
 let globalData = [];
 let filteredData = []; 
 let currentMode = "genre"; 
 let colorScaleGenre, colorScaleCluster;
 
+// Références D3
 let scatterSelection; 
 let timelineLayers; 
 let timelineBrush, timelineXScale, timelineBrushGroup;
 
+// --- 1. INITIALISATION ---
 async function init() {
     try {
         const data = await d3.csv("processed_data.csv");
         
+        // Conversion des types
         globalData = data.map(d => ({
             ...d,
             pca1: +d.pca1, pca2: +d.pca2, year: +d.year,
             danceability: +d.danceability, energy: +d.energy,
             valence: +d.valence, acousticness: +d.acousticness,
-            loudness: +d.loudness, tempo: +d.tempo, speechiness: +d.speechiness
+            loudness: +d.loudness, tempo: +d.tempo, speechiness: +d.speechiness,
+            liveness: +d.liveness, instrumentalness: +d.instrumentalness
         })).filter(d => d.year >= 1960);
 
         filteredData = globalData;
@@ -33,9 +41,10 @@ async function init() {
         setupSearch();
         setupLegend();
         
+        // Initial Draw
         updateAnalytics(filteredData);
 
-        // Remove loading
+        // Remove loading text
         d3.select("#loading").remove();
 
         // Listeners
@@ -62,6 +71,7 @@ function setupScales() {
         .range(d3.schemeSet2);
 }
 
+// --- 2. CARTE (MAIN VIEW) ---
 function setupMap() {
     const container = d3.select("#map-container");
     const width = container.node().getBoundingClientRect().width;
@@ -77,13 +87,14 @@ function setupMap() {
     const xScale = d3.scaleLinear().domain(xExtent).range([marginMap.left, width - marginMap.right]);
     const yScale = d3.scaleLinear().domain(yExtent).range([height - marginMap.bottom, marginMap.top]);
 
-    // Brush on Map
+    // Brush logic
     const brush = d3.brush()
         .extent([[0, 0], [width, height]])
         .on("end", brushedMap);
 
     svg.append("g").attr("class", "brush").call(brush);
 
+    // Points
     scatterSelection = svg.append("g")
         .selectAll("circle")
         .data(globalData)
@@ -94,47 +105,54 @@ function setupMap() {
         .attr("fill", d => getColor(d))
         .attr("opacity", 0.6);
 
-    // Tooltip logic
+    // Tooltip
     const tooltip = d3.select("body").append("div").attr("class", "tooltip").style("opacity", 0);
 
     scatterSelection.on("mouseover", (event, d) => {
+        // Show Tooltip
         tooltip.transition().duration(100).style("opacity", 1);
         tooltip.html(`
             <strong>${d.track_name}</strong><br/>
-            Artist: ${d.track_artist}<br/>
-            Genre: ${d.playlist_genre}<br/>
-            Year: ${d.year} | BPM: ${Math.round(d.tempo)}
+            ${d.track_artist}<br/>
+            ${d.year} | ${Math.round(d.tempo)} BPM
         `)
         .style("left", (event.pageX + 10) + "px")
         .style("top", (event.pageY - 28) + "px");
+
+        // SHOW RED LINE on Histograms for this specific track
+        showSpecificTrackLine(d);
     })
     .on("mouseout", () => {
         tooltip.transition().duration(200).style("opacity", 0);
+        // Hide red line
+        d3.selectAll(".specific-track-line").remove();
     });
 }
 
 function brushedMap(event) {
     if (!event.selection) {
+        // If selection cleared, reset to current time filter
         updateAnalytics(filteredData);
         return;
     }
     const [[x0, y0], [x1, y1]] = event.selection;
-    const svg = d3.select("#map-container svg");
     
-    // Reverse scale to find data bounds is tricky with SVG coords, 
-    // simpler to check circle coordinates directly in this setup
+    // Select points inside brush
     const selected = [];
     scatterSelection.each(function(d) {
         const cx = +d3.select(this).attr("cx");
         const cy = +d3.select(this).attr("cy");
-        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) {
-            selected.push(d);
+        if (d3.select(this).style("display") !== "none") { // only visible points
+            if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) {
+                selected.push(d);
+            }
         }
     });
     
     updateAnalytics(selected);
 }
 
+// --- 3. TIMELINE (BOTTOM) ---
 function setupTimeline() {
     const container = d3.select("#timeline-container");
     const width = container.node().getBoundingClientRect().width;
@@ -146,7 +164,6 @@ function setupTimeline() {
         .domain(d3.extent(globalData, d => d.year))
         .range([marginTime.left, width - marginTime.right]);
 
-    // Histogram/Stack prep
     const histogram = d3.histogram()
         .value(d => d.year)
         .domain(timelineXScale.domain())
@@ -154,7 +171,6 @@ function setupTimeline() {
 
     updateTimeline(svg, histogram, width, height);
 
-    // Brush
     timelineBrush = d3.brushX()
         .extent([[marginTime.left, 0], [width - marginTime.right, height]])
         .on("brush end", timelineBrushed);
@@ -165,14 +181,11 @@ function setupTimeline() {
 }
 
 function updateTimeline(svg, histogram, width, height) {
-    // Group by current mode
     const key = currentMode === "genre" ? "playlist_genre" : "cluster_label";
     const keys = currentMode === "genre" ? colorScaleGenre.domain() : colorScaleCluster.domain();
+    const scale = currentMode === "genre" ? colorScaleGenre : colorScaleCluster;
     
-    // Stack layout
-    // We need counts per year-bin per key
     const bins = histogram(globalData); 
-    // Prepare data for stack: each bin is a row, columns are keys
     const stackData = bins.map(bin => {
         const row = { x0: bin.x0, x1: bin.x1 };
         keys.forEach(k => row[k] = 0);
@@ -186,7 +199,7 @@ function updateTimeline(svg, histogram, width, height) {
     const series = stack(stackData);
 
     const yScale = d3.scaleLinear()
-        .domain([d3.min(series, layer => d3.min(layer, d => d[0])), d3.max(series, layer => d3.max(layer, d => d[1]))])
+        .domain([d3.min(series, l => d3.min(l, d => d[0])), d3.max(series, l => d3.max(l, d => d[1]))])
         .range([height - marginTime.bottom, marginTime.top]);
 
     const area = d3.area()
@@ -195,17 +208,16 @@ function updateTimeline(svg, histogram, width, height) {
         .y1(d => yScale(d[1]))
         .curve(d3.curveBasis);
 
-    svg.selectAll("path").remove();
+    svg.selectAll(".timeline-layer").remove();
     
-    timelineLayers = svg.selectAll("path")
+    timelineLayers = svg.selectAll(".timeline-layer")
         .data(series)
         .join("path")
-        .attr("fill", d => (currentMode==="genre"?colorScaleGenre:colorScaleCluster)(d.key))
+        .attr("class", "timeline-layer")
+        .attr("fill", d => scale(d.key))
         .attr("d", area)
-        .attr("opacity", 0.8)
-        .attr("class", "timeline-layer");
+        .attr("opacity", 0.8);
         
-    // Axis
     svg.selectAll(".axis").remove();
     svg.append("g")
         .attr("class", "axis")
@@ -216,13 +228,10 @@ function updateTimeline(svg, histogram, width, height) {
 function timelineBrushed(event) {
     if (!event.selection) {
         filteredData = globalData;
-        filterMapByTime(filteredData);
-        updateAnalytics(filteredData);
-        return;
+    } else {
+        const [x0, x1] = event.selection.map(timelineXScale.invert);
+        filteredData = globalData.filter(d => d.year >= x0 && d.year <= x1);
     }
-    const [x0, x1] = event.selection.map(timelineXScale.invert);
-    filteredData = globalData.filter(d => d.year >= x0 && d.year <= x1);
-    
     filterMapByTime(filteredData);
     updateAnalytics(filteredData);
 }
@@ -235,7 +244,6 @@ function filterMapByTime(data) {
 function updateColorMode() {
     scatterSelection.transition().duration(500).attr("fill", d => getColor(d));
     
-    // Rebuild timeline and legend
     d3.select("#timeline-container svg").selectAll("*").remove(); 
     d3.select("#timeline-container").html(""); 
     setupTimeline(); 
@@ -248,61 +256,56 @@ function getColor(d) {
     return currentMode === "genre" ? colorScaleGenre(d.playlist_genre) : colorScaleCluster(d.cluster_label);
 }
 
+// --- 4. LEGEND & INTERACTION ---
 function setupLegend() {
     const div = d3.select("#legend-container");
     const scale = currentMode === "genre" ? colorScaleGenre : colorScaleCluster;
     
     scale.domain().forEach(k => {
-        const r = div.append("div").attr("class", "legend-item")
-            .on("mouseover", () => { highlightGroup(k); highlightTimelineLayer(k); })
+        const item = div.append("div").attr("class", "legend-item")
+            .on("mouseover", () => highlightGroup(k))
             .on("mouseout", resetHighlight);
-        r.append("div").attr("class", "legend-dot").style("background", scale(k));
-        r.append("span").text(k);
+            
+        item.append("div").attr("class", "legend-dot").style("background", scale(k));
+        item.append("span").text(k);
     });
 }
 
 function highlightGroup(k) {
-    const key = currentMode==="genre"?"playlist_genre":"cluster_label";
+    const key = currentMode === "genre" ? "playlist_genre" : "cluster_label";
     
-    // Highlight points on Map
+    // 1. Dim Points on Map
     scatterSelection.attr("opacity", 0.1); 
-    scatterSelection.filter(d => d[key]===k).attr("opacity", 1).attr("r", 5).raise();
+    scatterSelection.filter(d => d[key] === k).attr("opacity", 1).attr("r", 4).raise();
 
-    // UPDATE ANALYTICS (Histogram & Radar) for this group ONLY
-    // This allows seeing the specific distribution (e.g., EDM Tempo)
+    // 2. Highlight Timeline
+    if(timelineLayers) {
+        timelineLayers.attr("opacity", 0.2).attr("stroke", "none");
+        timelineLayers.filter(d => d.key === k).attr("opacity", 1).attr("stroke", "#fff").attr("stroke-width", 1).raise();
+    }
+
+    // 3. UPDATE ANALYTICS for this group! (THIS IS THE FIX)
+    // We intersect the global time filter with the group selection
     const groupData = filteredData.filter(d => d[key] === k);
     updateAnalytics(groupData);
-}
-
-function highlightTimelineLayer(key) {
-    if(!timelineLayers) return;
-    timelineLayers.attr("opacity", 0.2).attr("stroke", "none");
-    timelineLayers.filter(d => d.key === key).attr("opacity", 1).attr("stroke", "#fff").attr("stroke-width", 1.5).raise();
 }
 
 function resetHighlight() {
     // Reset Map
     scatterSelection.attr("opacity", 0.6).attr("r", 2.5);
     
-    // Re-apply time filter display logic if needed
-    if(filteredData.length !== globalData.length) filterMapByTime(filteredData);
-    
-    // Search filter check
-    const term = document.getElementById('search-input').value;
-    if(term.length > 0) handleSearch(term);
-
     // Reset Timeline
-    timelineLayers.attr("opacity", 0.8).attr("stroke", "none");
+    if(timelineLayers) timelineLayers.attr("opacity", 0.8).attr("stroke", "none");
 
-    // RESET ANALYTICS to the current time selection (not just the hovered group)
+    // RESET ANALYTICS to the full current selection
     updateAnalytics(filteredData);
 }
 
+// --- 5. SEARCH ---
 function setupSearch() {
     const input = document.getElementById('search-input');
     const list = document.getElementById('search-suggestions');
     
-    // Populate datalist (simplified for perf)
     const artists = Array.from(new Set(globalData.map(d => d.track_artist))).slice(0, 500); 
     artists.forEach(a => {
         const opt = document.createElement('option');
@@ -311,39 +314,34 @@ function setupSearch() {
     });
 
     input.addEventListener('input', (e) => {
-        handleSearch(e.target.value);
+        const term = e.target.value.toLowerCase();
+        if(!term) {
+            scatterSelection.attr("display", "block");
+            if(filteredData.length !== globalData.length) filterMapByTime(filteredData);
+            updateAnalytics(filteredData);
+            return;
+        }
+        
+        const matches = filteredData.filter(d => 
+            d.track_name.toLowerCase().includes(term) || 
+            d.track_artist.toLowerCase().includes(term)
+        );
+        
+        const matchIds = new Set(matches.map(d => d.track_id));
+        scatterSelection.attr("display", d => matchIds.has(d.track_id) ? "block" : "none");
+        updateAnalytics(matches);
     });
 }
 
-function handleSearch(term) {
-    if(!term) {
-        scatterSelection.attr("display", "block");
-        if(filteredData.length !== globalData.length) filterMapByTime(filteredData);
-        updateAnalytics(filteredData);
-        return;
-    }
-    const lower = term.toLowerCase();
-    const matches = filteredData.filter(d => 
-        d.track_name.toLowerCase().includes(lower) || 
-        d.track_artist.toLowerCase().includes(lower)
-    );
-    
-    const matchIds = new Set(matches.map(d => d.track_id));
-    scatterSelection.attr("display", d => matchIds.has(d.track_id) ? "block" : "none");
-    
-    updateAnalytics(matches);
-}
-
-// --- ANALYTICS (Charts) ---
+// --- 6. ANALYTICS (GRAPHS) ---
 function updateAnalytics(data) {
-    if(!data || data.length === 0) return;
+    // Always clear if empty to show feedback, but here simply return if totally empty
+    // to avoid D3 errors, or draw empty.
+    if(!data) return;
 
-    // 1. Radar Chart
     drawRadar(data);
-
-    // 2. Histograms
-    drawHistogram(data, "tempo", "#tempo-container", "BPM");
-    drawHistogram(data, "loudness", "#loudness-container", "dB");
+    drawHistogram(data, "tempo", "#tempo-container", " BPM");
+    drawHistogram(data, "loudness", "#loudness-container", " dB");
 }
 
 function drawRadar(data) {
@@ -355,13 +353,11 @@ function drawRadar(data) {
 
     const features = ['danceability', 'energy', 'speechiness', 'acousticness', 'liveness', 'valence'];
     
-    // Calculate means
+    // Compute mean
     const means = {};
-    features.forEach(f => means[f] = d3.mean(data, d => d[f]));
-
-    // Global means for comparison (optional, but good)
-    const globalMeans = {};
-    features.forEach(f => globalMeans[f] = d3.mean(globalData, d => d[f]));
+    features.forEach(f => {
+        means[f] = data.length ? d3.mean(data, d => d[f]) : 0;
+    });
 
     const svg = container.append("svg").attr("width", width).attr("height", height)
         .append("g").attr("transform", `translate(${width/2},${height/2})`);
@@ -369,12 +365,9 @@ function drawRadar(data) {
     const angleSlice = Math.PI * 2 / features.length;
     const rScale = d3.scaleLinear().range([0, radius]).domain([0, 1]);
 
-    // Axis
+    // Axis & Labels
     features.forEach((f, i) => {
         const angle = i * angleSlice - Math.PI/2;
-        const x = rScale(1.1) * Math.cos(angle);
-        const y = rScale(1.1) * Math.sin(angle);
-        
         svg.append("line")
             .attr("x1", 0).attr("y1", 0)
             .attr("x2", rScale(1) * Math.cos(angle))
@@ -382,14 +375,15 @@ function drawRadar(data) {
             .attr("stroke", "#444");
             
         svg.append("text")
-            .attr("x", x).attr("y", y)
-            .text(f.substr(0,4))
+            .attr("x", rScale(1.15) * Math.cos(angle))
+            .attr("y", rScale(1.15) * Math.sin(angle))
+            .text(f.substr(0,4).toUpperCase())
             .style("text-anchor", "middle")
             .style("fill", "#ccc")
-            .style("font-size", "10px");
+            .style("font-size", "9px");
     });
 
-    // Draw Shape
+    // The Shape
     const line = d3.lineRadial()
         .angle((d,i) => i * angleSlice)
         .radius(d => rScale(d))
@@ -397,13 +391,13 @@ function drawRadar(data) {
 
     const dataPoints = features.map(f => means[f]);
     
-    // Fill area
     svg.append("path")
         .datum(dataPoints)
         .attr("d", line)
-        .style("fill", "var(--accent)")
+        .style("fill", ACCENT_COLOR) // <--- GREEN FORCED
         .style("fill-opacity", 0.4)
-        .style("stroke", "var(--accent)");
+        .style("stroke", ACCENT_COLOR)
+        .style("stroke-width", 2);
 }
 
 function drawHistogram(data, feature, selector, unit) {
@@ -419,24 +413,30 @@ function drawHistogram(data, feature, selector, unit) {
         .append("g")
         .attr("transform", `translate(${marginHist.left},${marginHist.top})`);
 
-    const xExtent = d3.extent(data, d => d[feature]);
+    // X Scale
+    const xExtent = d3.extent(globalData, d => d[feature]); // Keep global extent for stability
     const xScale = d3.scaleLinear().domain(xExtent).range([0, width]);
 
+    // Bins
     const histogram = d3.histogram()
         .value(d => d[feature])
         .domain(xScale.domain())
         .thresholds(xScale.ticks(20));
 
     const bins = histogram(data);
+    
+    // Y Scale (Dynamic based on selection)
     const yScale = d3.scaleLinear()
-        .domain([0, d3.max(bins, d => d.length)])
+        .domain([0, d3.max(bins, d => d.length) || 1])
         .range([height, 0]);
 
+    // Axis
     svg.append("g")
         .attr("transform", `translate(0,${height})`)
-        .call(d3.axisBottom(xScale).ticks(5).tickFormat(d => d + unit))
+        .call(d3.axisBottom(xScale).ticks(5).tickFormat(d => Math.round(d) + unit))
         .style("color", "#888");
 
+    // Bars
     svg.selectAll("rect")
         .data(bins)
         .join("rect")
@@ -444,7 +444,38 @@ function drawHistogram(data, feature, selector, unit) {
         .attr("transform", d => `translate(${xScale(d.x0)}, ${yScale(d.length)})`)
         .attr("width", d => Math.max(0, xScale(d.x1) - xScale(d.x0) - 1))
         .attr("height", d => height - yScale(d.length))
-        .style("fill", "var(--accent)");
+        .style("fill", ACCENT_COLOR); // <--- GREEN FORCED
+        
+    // Save scales for red line usage
+    container.node().xScale = xScale;
+    container.node().height = height;
+}
+
+// Function to draw the vertical red line on hover
+function showSpecificTrackLine(d) {
+    drawSingleLine(d.tempo, "#tempo-container");
+    drawSingleLine(d.loudness, "#loudness-container");
+}
+
+function drawSingleLine(value, selector) {
+    const container = d3.select(selector);
+    const svg = container.select("svg g");
+    if(svg.empty()) return;
+    
+    const xScale = container.node().xScale;
+    const height = container.node().height;
+    
+    if(!xScale) return;
+
+    svg.append("line")
+        .attr("class", "specific-track-line")
+        .attr("x1", xScale(value))
+        .attr("x2", xScale(value))
+        .attr("y1", 0)
+        .attr("y2", height)
+        .attr("stroke", "red")
+        .attr("stroke-width", 2)
+        .attr("stroke-dasharray", "4,2");
 }
 
 init();
