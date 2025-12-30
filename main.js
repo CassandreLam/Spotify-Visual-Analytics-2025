@@ -366,5 +366,5 @@ function setupSearch() {
     });
 }
 
-// Lancement
-init();
+document.addEventListener("DOMContentLoaded", init);
+
