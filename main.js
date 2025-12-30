@@ -1,22 +1,18 @@
 // js/main.js
 
-// --- CONFIGURATION ---
 const marginMap = {top: 10, right: 10, bottom: 20, left: 30};
 const marginTime = {top: 5, right: 10, bottom: 20, left: 30};
 const marginHist = {top: 10, right: 10, bottom: 30, left: 35}; 
 
-// --- STATE ---
 let globalData = [];
 let filteredData = []; 
 let currentMode = "genre"; 
 let colorScaleGenre, colorScaleCluster;
 
-// Références D3
 let scatterSelection; 
 let timelineLayers; 
 let timelineBrush, timelineXScale, timelineBrushGroup;
 
-// --- 1. INITIALISATION ---
 async function init() {
     try {
         const data = await d3.csv("processed_data.csv");
@@ -30,349 +26,252 @@ async function init() {
         })).filter(d => d.year >= 1960);
 
         filteredData = globalData;
+
+        setupScales();
+        setupMap();
+        setupTimeline();
+        setupSearch();
+        setupLegend();
+        
+        updateAnalytics(filteredData);
+
+        // Remove loading
         d3.select("#loading").remove();
 
-        // 1. SETUP SEARCH (Optimisé)
-        setupSearchSuggestions(globalData);
-
-        // Init Colors
-        const genres = [...new Set(globalData.map(d => d.playlist_genre))].sort();
-        colorScaleGenre = d3.scaleOrdinal(genres, d3.schemeTableau10);
-        const clusters = [...new Set(globalData.map(d => d.cluster_label))].sort();
-        colorScaleCluster = d3.scaleOrdinal(clusters, d3.schemeSet3);
-
-        // --- EVENTS UI ---
-        d3.select("#search-input").on("input", function() {
-            handleSearch(this.value);
-        });
-
+        // Listeners
         d3.select("#color-mode").on("change", function() {
             currentMode = this.value;
-            renderAll();
+            updateColorMode();
         });
 
-        d3.select("#input-year-start").on("change", updateFromInput);
-        d3.select("#input-year-end").on("change", updateFromInput);
-        d3.select("#btn-reset-time").on("click", () => {
-            timelineBrushGroup.call(timelineBrush.move, null);
-            document.getElementById('search-input').value = "";
-            handleSearch("");
-        });
-
-        makeResizable(document.getElementById('resizer-horiz'), 'horizontal');
-        makeResizable(document.getElementById('resizer-vert'), 'vertical');
-
-        // --- FIRST RENDER ---
-        renderAll();
-
-        // --- AUTO-RESIZE ---
-        const observer = new ResizeObserver(entries => {
-            if(window.resizeTimer) clearTimeout(window.resizeTimer);
-            window.resizeTimer = setTimeout(renderAll, 50);
-        });
-        observer.observe(document.getElementById('scatter-wrapper'));
-        observer.observe(document.getElementById('timeline-wrapper'));
-        observer.observe(document.getElementById('sidebar-panel'));
-
-    } catch (e) { console.error(e); }
-}
-
-function renderAll() {
-    drawScatter(globalData);
-    drawTimeline(globalData);
-    updateSidebar(filteredData);
-    updateLegend();
-    
-    const term = document.getElementById('search-input').value;
-    if(term) handleSearch(term);
-}
-
-function setupSearchSuggestions(data) {
-    const list = document.getElementById('search-suggestions');
-    list.innerHTML = '';
-    const artistCounts = {};
-    data.forEach(d => { artistCounts[d.track_artist] = (artistCounts[d.track_artist] || 0) + 1; });
-    const topArtists = Object.keys(artistCounts).sort((a, b) => artistCounts[b] - artistCounts[a]).slice(0, 1000); 
-    topArtists.sort().forEach(artist => { 
-        const opt = document.createElement('option'); opt.value = artist; list.appendChild(opt);
-    });
-}
-
-function handleSearch(term) {
-    if (!term || term.length === 0) {
-        scatterSelection.attr("opacity", 0.6).attr("r", 2.5).attr("stroke", "none");
-        return;
-    }
-    const cleanTerm = term.toLowerCase().trim();
-    scatterSelection.each(function(d) {
-        const el = d3.select(this);
-        const isExact = d.track_artist.toLowerCase() === cleanTerm;
-        const isMatch = d.track_artist.toLowerCase().includes(cleanTerm) || d.track_name.toLowerCase().includes(cleanTerm);
-        if (isExact) el.attr("opacity", 1).attr("r", 8).attr("stroke", "#fff").attr("stroke-width", 3).raise();
-        else if (isMatch) el.attr("opacity", 0.8).attr("r", 5).attr("stroke", "#fff").attr("stroke-width", 1).raise();
-        else el.attr("opacity", 0.05).attr("r", 2).attr("stroke", "none");
-    });
-}
-
-function makeResizable(resizer, direction) {
-    const leftCol = document.getElementById('left-col');
-    const sidebar = document.getElementById('sidebar-panel');
-    const timelinePanel = document.getElementById('timeline-panel');
-    let isResizing = false;
-
-    resizer.addEventListener('mousedown', (e) => {
-        isResizing = true; document.body.style.cursor = direction === 'horizontal' ? 'col-resize' : 'row-resize'; e.preventDefault();
-    });
-    document.addEventListener('mousemove', (e) => {
-        if (!isResizing) return;
-        if (direction === 'horizontal') {
-            const newWidth = document.body.clientWidth - e.clientX;
-            if (newWidth > 200 && newWidth < 800) sidebar.style.width = `${newWidth}px`;
-        } else {
-            const containerRect = leftCol.getBoundingClientRect();
-            const newHeight = containerRect.bottom - e.clientY;
-            if (newHeight > 100 && newHeight < leftCol.clientHeight * 0.7) timelinePanel.style.height = `${newHeight}px`;
-        }
-    });
-    document.addEventListener('mouseup', () => {
-        if(isResizing) { isResizing = false; document.body.style.cursor = 'default'; renderAll(); }
-    });
-}
-
-function updateFromInput() {
-    const yStart = +document.getElementById('input-year-start').value;
-    const yEnd = +document.getElementById('input-year-end').value;
-    if (yStart < yEnd && timelineXScale && timelineBrushGroup) {
-        timelineBrushGroup.call(timelineBrush.move, [timelineXScale(yStart), timelineXScale(yEnd)]);
+    } catch (error) {
+        console.error("Error loading data:", error);
     }
 }
 
-// --- D3 CHARTS ---
+function setupScales() {
+    const genres = Array.from(new Set(globalData.map(d => d.playlist_genre))).sort();
+    const clusters = Array.from(new Set(globalData.map(d => d.cluster_label))).sort();
 
-function drawScatter(data) {
-    const c = document.getElementById('scatter-wrapper'); c.innerHTML = "";
-    const w = c.clientWidth, h = c.clientHeight;
-    const svg = d3.select(c).append("svg").attr("width", w).attr("height", h);
+    colorScaleGenre = d3.scaleOrdinal()
+        .domain(genres)
+        .range(d3.schemeCategory10);
 
-    // --- CORRECTION CLIC VIDE (Fermer tooltip) ---
-    svg.on("click", (e) => {
-        if(e.target.tagName !== "circle") {
-            // Clic dans le vide : on reset tout
-            const tooltip = d3.select("body").selectAll(".tooltip");
-            tooltip.style("opacity", 0);
-            resetHighlight();
-            // IMPORTANT : On remet la sidebar en mode "Moyenne Globale"
-            updateSidebar(filteredData);
-        }
-    });
+    colorScaleCluster = d3.scaleOrdinal()
+        .domain(clusters)
+        .range(d3.schemeSet2);
+}
 
-    const zoom = d3.zoom().scaleExtent([0.5, 20]).on("zoom", e => {
-        gPoints.attr("transform", e.transform);
-        gGrid.attr("transform", e.transform);
-    });
-    svg.call(zoom);
-    svg.append("defs").append("clipPath").attr("id", "clip").append("rect").attr("width", w).attr("height", h);
+function setupMap() {
+    const container = d3.select("#map-container");
+    const width = container.node().getBoundingClientRect().width;
+    const height = container.node().getBoundingClientRect().height;
 
-    const xExt = d3.extent(data, d => d.pca1);
-    const yExt = d3.extent(data, d => d.pca2);
-    const x = d3.scaleLinear().domain([xExt[0]*1.1, xExt[1]*1.1]).range([marginMap.left, w - marginMap.right]);
-    const y = d3.scaleLinear().domain([yExt[0]*1.1, yExt[1]*1.1]).range([h - marginMap.bottom, marginMap.top]);
+    const svg = container.append("svg")
+        .attr("width", width)
+        .attr("height", height);
 
-    const gGrid = svg.append("g");
-    gGrid.append("g").attr("transform", `translate(0,${h-marginMap.bottom})`).call(d3.axisBottom(x).tickSize(-h).ticks(8)).style("color","#333").select(".domain").remove();
-    gGrid.append("g").attr("transform", `translate(${marginMap.left},0)`).call(d3.axisLeft(y).tickSize(-w).ticks(8)).style("color","#333").select(".domain").remove();
+    const xExtent = d3.extent(globalData, d => d.pca1);
+    const yExtent = d3.extent(globalData, d => d.pca2);
 
-    const gPoints = svg.append("g").attr("clip-path", "url(#clip)");
-    scatterSelection = gPoints.selectAll("circle").data(data).join("circle")
-        .attr("cx", d => x(d.pca1)).attr("cy", d => y(d.pca2)).attr("r", 2.5)
-        .attr("fill", d => getCurrentColor(d)).attr("opacity", 0.6);
+    const xScale = d3.scaleLinear().domain(xExtent).range([marginMap.left, width - marginMap.right]);
+    const yScale = d3.scaleLinear().domain(yExtent).range([height - marginMap.bottom, marginMap.top]);
 
+    // Brush on Map
+    const brush = d3.brush()
+        .extent([[0, 0], [width, height]])
+        .on("end", brushedMap);
+
+    svg.append("g").attr("class", "brush").call(brush);
+
+    scatterSelection = svg.append("g")
+        .selectAll("circle")
+        .data(globalData)
+        .join("circle")
+        .attr("cx", d => xScale(d.pca1))
+        .attr("cy", d => yScale(d.pca2))
+        .attr("r", 2.5)
+        .attr("fill", d => getColor(d))
+        .attr("opacity", 0.6);
+
+    // Tooltip logic
     const tooltip = d3.select("body").append("div").attr("class", "tooltip").style("opacity", 0);
 
-    scatterSelection.on("mouseover", (e, d) => {
-        // 1. Highlight Point
-        d3.select(e.currentTarget).attr("r", 8).attr("stroke", "#fff").attr("stroke-width", 2).attr("opacity", 1).raise();
-        
-        // 2. Highlight Timeline
-        const key = currentMode === "genre" ? d.playlist_genre : d.cluster_label;
-        highlightTimelineLayer(key);
-
-        // 3. UPDATE SIDEBAR (SINGLE SONG MODE) --- NOUVEAU
-        // On affiche le radar de CETTE chanson et on marque sa position sur les histos
-        drawRadarSingle(d); 
-        drawHist(filteredData, "tempo", "tempo-container", 20, d.tempo);
-        drawHist(filteredData, "loudness", "loudness-container", 20, d.loudness);
-
-        // 4. Tooltip
-        const bpm = Math.round(d.tempo);
-        const energy = Math.round(d.energy * 100);
-        tooltip.style("opacity", 1).html(`
-            <div class="tooltip-title">${d.track_name}</div>
-            <div class="tooltip-artist">${d.track_artist}</div>
-            <div class="tooltip-meta"><span>📅 ${d.year}</span><span>🎵 ${d.playlist_genre}</span></div>
-            <div class="tooltip-meta" style="margin-top:4px; padding-top:4px; border-top:1px solid #444">
-                <span>BPM: <span class="tooltip-val">${bpm}</span></span>
-                <span>Energy: <span class="tooltip-val">${energy}%</span></span>
-            </div>
-        `).style("left", (e.pageX+15)+"px").style("top", (e.pageY-15)+"px");
-
-    }).on("mouseout", (e) => {
-        const term = document.getElementById('search-input').value;
-        if (term.length > 0) handleSearch(term.toLowerCase()); 
-        else if(d3.select(e.currentTarget).style("opacity") != 0.1) d3.select(e.currentTarget).attr("r", 2.5).attr("opacity", 0.6).attr("stroke", "none");
-        
-        resetTimelineHighlight();
-        tooltip.style("opacity", 0);
-        
-        // 5. RESTORE SIDEBAR (GLOBAL MODE) --- NOUVEAU
-        updateSidebar(filteredData);
+    scatterSelection.on("mouseover", (event, d) => {
+        tooltip.transition().duration(100).style("opacity", 1);
+        tooltip.html(`
+            <strong>${d.track_name}</strong><br/>
+            Artist: ${d.track_artist}<br/>
+            Genre: ${d.playlist_genre}<br/>
+            Year: ${d.year} | BPM: ${Math.round(d.tempo)}
+        `)
+        .style("left", (event.pageX + 10) + "px")
+        .style("top", (event.pageY - 28) + "px");
+    })
+    .on("mouseout", () => {
+        tooltip.transition().duration(200).style("opacity", 0);
     });
 }
 
-function drawTimeline(data) {
-    const c = document.getElementById('timeline-wrapper'); c.innerHTML = "";
-    const w = c.clientWidth, h = c.clientHeight;
-    const svg = d3.select(c).append("svg").attr("width", w).attr("height", h);
+function brushedMap(event) {
+    if (!event.selection) {
+        updateAnalytics(filteredData);
+        return;
+    }
+    const [[x0, y0], [x1, y1]] = event.selection;
+    const svg = d3.select("#map-container svg");
+    
+    // Reverse scale to find data bounds is tricky with SVG coords, 
+    // simpler to check circle coordinates directly in this setup
+    const selected = [];
+    scatterSelection.each(function(d) {
+        const cx = +d3.select(this).attr("cx");
+        const cy = +d3.select(this).attr("cy");
+        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) {
+            selected.push(d);
+        }
+    });
+    
+    updateAnalytics(selected);
+}
 
+function setupTimeline() {
+    const container = d3.select("#timeline-container");
+    const width = container.node().getBoundingClientRect().width;
+    const height = container.node().getBoundingClientRect().height;
+
+    const svg = container.append("svg").attr("width", width).attr("height", height);
+
+    timelineXScale = d3.scaleLinear()
+        .domain(d3.extent(globalData, d => d.year))
+        .range([marginTime.left, width - marginTime.right]);
+
+    // Histogram/Stack prep
+    const histogram = d3.histogram()
+        .value(d => d.year)
+        .domain(timelineXScale.domain())
+        .thresholds(d3.range(1960, 2025, 5));
+
+    updateTimeline(svg, histogram, width, height);
+
+    // Brush
+    timelineBrush = d3.brushX()
+        .extent([[marginTime.left, 0], [width - marginTime.right, height]])
+        .on("brush end", timelineBrushed);
+
+    timelineBrushGroup = svg.append("g")
+        .attr("class", "brush")
+        .call(timelineBrush);
+}
+
+function updateTimeline(svg, histogram, width, height) {
+    // Group by current mode
     const key = currentMode === "genre" ? "playlist_genre" : "cluster_label";
     const keys = currentMode === "genre" ? colorScaleGenre.domain() : colorScaleCluster.domain();
     
-    const grouped = d3.rollup(data, v => v.length, d => d.year, d => d[key]);
-    const years = Array.from(d3.group(data, d => d.year).keys()).sort((a,b)=>a-b);
-    const stackData = years.map(y => {
-        const row = { year: y }; keys.forEach(k => row[k] = grouped.get(y)?.get(k) || 0); return row;
+    // Stack layout
+    // We need counts per year-bin per key
+    const bins = histogram(globalData); 
+    // Prepare data for stack: each bin is a row, columns are keys
+    const stackData = bins.map(bin => {
+        const row = { x0: bin.x0, x1: bin.x1 };
+        keys.forEach(k => row[k] = 0);
+        bin.forEach(d => {
+            if(keys.includes(d[key])) row[d[key]]++;
+        });
+        return row;
     });
 
-    const series = d3.stack().keys(keys).offset(d3.stackOffsetSilhouette)(stackData);
-    timelineXScale = d3.scaleLinear().domain(d3.extent(years)).range([marginTime.left, w - marginTime.right]);
-    const y = d3.scaleLinear().domain([d3.min(series, s=>d3.min(s, d=>d[0])), d3.max(series, s=>d3.max(s, d=>d[1]))]).range([h - marginTime.bottom, marginTime.top]);
-    const area = d3.area().x(d => timelineXScale(d.data.year)).y0(d => y(d[0])).y1(d => y(d[1])).curve(d3.curveBasis);
+    const stack = d3.stack().keys(keys).offset(d3.stackOffsetSilhouette);
+    const series = stack(stackData);
 
-    timelineLayers = svg.selectAll("path").data(series).join("path")
-        .attr("class", "timeline-layer")
-        .attr("d", area)
+    const yScale = d3.scaleLinear()
+        .domain([d3.min(series, layer => d3.min(layer, d => d[0])), d3.max(series, layer => d3.max(layer, d => d[1]))])
+        .range([height - marginTime.bottom, marginTime.top]);
+
+    const area = d3.area()
+        .x(d => timelineXScale((d.data.x0 + d.data.x1)/2))
+        .y0(d => yScale(d[0]))
+        .y1(d => yScale(d[1]))
+        .curve(d3.curveBasis);
+
+    svg.selectAll("path").remove();
+    
+    timelineLayers = svg.selectAll("path")
+        .data(series)
+        .join("path")
         .attr("fill", d => (currentMode==="genre"?colorScaleGenre:colorScaleCluster)(d.key))
-        .attr("opacity", 0.85).attr("stroke", "#000").attr("stroke-width", 0.5)
-        .on("mouseover", function(e, d) { d3.select(this).attr("stroke", "#fff").attr("opacity", 1); highlightGroup(d.key); })
-        .on("mouseout", function() { d3.select(this).attr("stroke", "#000").attr("opacity", 0.85); resetHighlight(); });
-
-    svg.append("g").attr("transform", `translate(0,${h-marginTime.bottom})`)
-        .call(d3.axisBottom(timelineXScale).ticks(w/60).tickFormat(d3.format("d"))).style("color", "#666").select(".domain").remove();
-
-    timelineBrush = d3.brushX().extent([[marginTime.left, 0], [w - marginTime.right, h - marginTime.bottom]]).on("brush end", brushed);
-    timelineBrushGroup = svg.append("g").attr("class", "brush").call(timelineBrush);
+        .attr("d", area)
+        .attr("opacity", 0.8)
+        .attr("class", "timeline-layer");
+        
+    // Axis
+    svg.selectAll(".axis").remove();
+    svg.append("g")
+        .attr("class", "axis")
+        .attr("transform", `translate(0,${height - marginTime.bottom})`)
+        .call(d3.axisBottom(timelineXScale).tickFormat(d3.format("d")));
 }
 
-function brushed(event) {
-    if(!event.selection) {
+function timelineBrushed(event) {
+    if (!event.selection) {
         filteredData = globalData;
-        if(globalData.length) {
-            const ext = d3.extent(globalData, d=>d.year);
-            document.getElementById('input-year-start').value = ext[0];
-            document.getElementById('input-year-end').value = ext[1];
-        }
-    } else {
-        const [x0, x1] = event.selection;
-        const y0 = Math.round(timelineXScale.invert(x0));
-        const y1 = Math.round(timelineXScale.invert(x1));
-        document.getElementById('input-year-start').value = y0;
-        document.getElementById('input-year-end').value = y1;
-        filteredData = globalData.filter(d => d.year >= y0 && d.year <= y1);
+        filterMapByTime(filteredData);
+        updateAnalytics(filteredData);
+        return;
     }
-    updateSidebar(filteredData);
+    const [x0, x1] = event.selection.map(timelineXScale.invert);
+    filteredData = globalData.filter(d => d.year >= x0 && d.year <= x1);
+    
     filterMapByTime(filteredData);
+    updateAnalytics(filteredData);
 }
 
-// --- SIDEBAR ANALYTICS ---
-
-function updateSidebar(data) {
-    if(!data.length) return;
-    drawRadar(data); // Mode moyenne par défaut
-    drawHist(data, "tempo", "tempo-container", 20);
-    drawHist(data, "loudness", "loudness-container", 20);
+function filterMapByTime(data) {
+    const ids = new Set(data.map(d => d.track_id));
+    scatterSelection.attr("display", d => ids.has(d.track_id) ? "block" : "none");
 }
 
-// Mode Radar "Moyenne"
-function drawRadar(data) {
-    drawRadarGeneric(data, true);
-}
-// Mode Radar "Chanson Unique"
-function drawRadarSingle(d) {
-    drawRadarGeneric([d], false);
-}
-
-function drawRadarGeneric(data, isAverage) {
-    const c = document.getElementById('radar-container'); c.innerHTML = "";
-    const w = c.clientWidth, h = c.clientHeight;
-    const svg = d3.select(c).append("svg").attr("width", w).attr("height", h);
+function updateColorMode() {
+    scatterSelection.transition().duration(500).attr("fill", d => getColor(d));
     
-    const feats = ["energy", "danceability", "valence", "acousticness", "speechiness"];
-    // Si isAverage=true, on calcule la moyenne, sinon on prend les valeurs brutes du premier élément
-    const stats = feats.map(f => ({axis: f, value: isAverage ? d3.mean(data, d => d[f]) : data[0][f]}));
+    // Rebuild timeline and legend
+    d3.select("#timeline-container svg").selectAll("*").remove(); 
+    d3.select("#timeline-container").html(""); 
+    setupTimeline(); 
     
-    const r = Math.min(w, h)/2 - 30;
-    const g = svg.append("g").attr("transform", `translate(${w/2},${h/2})`);
-    const rScale = d3.scaleLinear().range([0, r]);
-    const ang = Math.PI * 2 / feats.length;
-
-    feats.forEach((f, i) => {
-        const a = i * ang - Math.PI/2;
-        g.append("line").attr("x2", Math.cos(a)*r).attr("y2", Math.sin(a)*r).attr("stroke", "#333");
-        g.append("text").attr("x", Math.cos(a)*(r+15)).attr("y", Math.sin(a)*(r+15)).text(f)
-         .attr("text-anchor","middle").attr("fill","#888").style("font-size","9px");
-    });
-    
-    const line = d3.lineRadial().angle((d,i)=>i*ang).radius(d=>rScale(d.value)).curve(d3.curveLinearClosed);
-    g.append("path").datum(stats).attr("d", line)
-        .attr("fill", isAverage ? "rgba(29,185,84,0.4)" : "rgba(255, 255, 255, 0.2)") // Blanc si single
-        .attr("stroke", isAverage ? "#1DB954" : "#fff")
-        .attr("stroke-width", isAverage ? 1 : 2);
+    d3.select("#legend-container").html("");
+    setupLegend();
 }
 
-// Histogramme avec option "HighlightValue"
-function drawHist(data, feat, id, bins, highlightVal = null) {
-    const c = document.getElementById(id); c.innerHTML = "";
-    const w = c.clientWidth, h = c.clientHeight;
-    const svg = d3.select(c).append("svg").attr("width", w).attr("height", h);
-
-    const x = d3.scaleLinear().domain(d3.extent(globalData, d=>d[feat])).range([marginHist.left, w - marginHist.right]);
-    const hist = d3.bin().domain(x.domain()).thresholds(x.ticks(bins))(data.map(d=>d[feat]));
-    const y = d3.scaleLinear().domain([0, d3.max(hist, d=>d.length)]).range([h - marginHist.bottom, marginHist.top]);
-
-    // Barres
-    svg.selectAll("rect").data(hist).join("rect").attr("x", d=>x(d.x0)+1).attr("width", d=>Math.max(0, x(d.x1)-x(d.x0)-1))
-        .attr("y", d=>y(d.length)).attr("height", d=>h - marginHist.bottom - y(d.length)).attr("fill", "#1DB954").attr("opacity", 0.7);
-    
-    // Marqueur Chanson Unique (Ligne rouge)
-    if(highlightVal !== null) {
-        svg.append("line")
-            .attr("x1", x(highlightVal)).attr("x2", x(highlightVal))
-            .attr("y1", marginHist.top).attr("y2", h - marginHist.bottom)
-            .attr("stroke", "#ff3b30").attr("stroke-width", 2).attr("stroke-dasharray", "4,2");
-    }
-
-    svg.append("g").attr("transform", `translate(0,${h - marginHist.bottom})`)
-       .call(d3.axisBottom(x).ticks(5)).style("color","#555").select(".domain").remove();
+function getColor(d) {
+    return currentMode === "genre" ? colorScaleGenre(d.playlist_genre) : colorScaleCluster(d.cluster_label);
 }
 
-// --- UTILS ---
-function getCurrentColor(d) { return currentMode==="genre"?colorScaleGenre(d.playlist_genre):colorScaleCluster(d.cluster_label); }
-
-function updateLegend() {
-    const div = d3.select("#legend-container"); div.html("");
-    (currentMode==="genre"?colorScaleGenre:colorScaleCluster).domain().forEach(k => {
+function setupLegend() {
+    const div = d3.select("#legend-container");
+    const scale = currentMode === "genre" ? colorScaleGenre : colorScaleCluster;
+    
+    scale.domain().forEach(k => {
         const r = div.append("div").attr("class", "legend-item")
             .on("mouseover", () => { highlightGroup(k); highlightTimelineLayer(k); })
             .on("mouseout", resetHighlight);
-        r.append("div").attr("class", "legend-dot").style("background", (currentMode==="genre"?colorScaleGenre:colorScaleCluster)(k));
+        r.append("div").attr("class", "legend-dot").style("background", scale(k));
         r.append("span").text(k);
     });
 }
 
 function highlightGroup(k) {
     const key = currentMode==="genre"?"playlist_genre":"cluster_label";
+    
+    // Highlight points on Map
     scatterSelection.attr("opacity", 0.1); 
     scatterSelection.filter(d => d[key]===k).attr("opacity", 1).attr("r", 5).raise();
+
+    // UPDATE ANALYTICS (Histogram & Radar) for this group ONLY
+    // This allows seeing the specific distribution (e.g., EDM Tempo)
+    const groupData = filteredData.filter(d => d[key] === k);
+    updateAnalytics(groupData);
 }
 
 function highlightTimelineLayer(key) {
@@ -382,18 +281,170 @@ function highlightTimelineLayer(key) {
 }
 
 function resetHighlight() {
+    // Reset Map
     scatterSelection.attr("opacity", 0.6).attr("r", 2.5);
+    
+    // Re-apply time filter display logic if needed
     if(filteredData.length !== globalData.length) filterMapByTime(filteredData);
     
+    // Search filter check
     const term = document.getElementById('search-input').value;
-    if(term.length > 0) handleSearch(term.toLowerCase());
+    if(term.length > 0) handleSearch(term);
 
-    if(timelineLayers) timelineLayers.attr("opacity", 0.85).attr("stroke", "#000").attr("stroke-width", 0.5);
+    // Reset Timeline
+    timelineLayers.attr("opacity", 0.8).attr("stroke", "none");
+
+    // RESET ANALYTICS to the current time selection (not just the hovered group)
+    updateAnalytics(filteredData);
 }
 
-function filterMapByTime(data) {
-    const years = new Set(data.map(d=>d.year));
-    scatterSelection.style("display", d=>years.has(d.year)?"block":"none");
+function setupSearch() {
+    const input = document.getElementById('search-input');
+    const list = document.getElementById('search-suggestions');
+    
+    // Populate datalist (simplified for perf)
+    const artists = Array.from(new Set(globalData.map(d => d.track_artist))).slice(0, 500); 
+    artists.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a;
+        list.appendChild(opt);
+    });
+
+    input.addEventListener('input', (e) => {
+        handleSearch(e.target.value);
+    });
+}
+
+function handleSearch(term) {
+    if(!term) {
+        scatterSelection.attr("display", "block");
+        if(filteredData.length !== globalData.length) filterMapByTime(filteredData);
+        updateAnalytics(filteredData);
+        return;
+    }
+    const lower = term.toLowerCase();
+    const matches = filteredData.filter(d => 
+        d.track_name.toLowerCase().includes(lower) || 
+        d.track_artist.toLowerCase().includes(lower)
+    );
+    
+    const matchIds = new Set(matches.map(d => d.track_id));
+    scatterSelection.attr("display", d => matchIds.has(d.track_id) ? "block" : "none");
+    
+    updateAnalytics(matches);
+}
+
+// --- ANALYTICS (Charts) ---
+function updateAnalytics(data) {
+    if(!data || data.length === 0) return;
+
+    // 1. Radar Chart
+    drawRadar(data);
+
+    // 2. Histograms
+    drawHistogram(data, "tempo", "#tempo-container", "BPM");
+    drawHistogram(data, "loudness", "#loudness-container", "dB");
+}
+
+function drawRadar(data) {
+    const container = d3.select("#radar-container");
+    container.html("");
+    const width = container.node().getBoundingClientRect().width;
+    const height = container.node().getBoundingClientRect().height;
+    const radius = Math.min(width, height) / 2 - 20;
+
+    const features = ['danceability', 'energy', 'speechiness', 'acousticness', 'liveness', 'valence'];
+    
+    // Calculate means
+    const means = {};
+    features.forEach(f => means[f] = d3.mean(data, d => d[f]));
+
+    // Global means for comparison (optional, but good)
+    const globalMeans = {};
+    features.forEach(f => globalMeans[f] = d3.mean(globalData, d => d[f]));
+
+    const svg = container.append("svg").attr("width", width).attr("height", height)
+        .append("g").attr("transform", `translate(${width/2},${height/2})`);
+
+    const angleSlice = Math.PI * 2 / features.length;
+    const rScale = d3.scaleLinear().range([0, radius]).domain([0, 1]);
+
+    // Axis
+    features.forEach((f, i) => {
+        const angle = i * angleSlice - Math.PI/2;
+        const x = rScale(1.1) * Math.cos(angle);
+        const y = rScale(1.1) * Math.sin(angle);
+        
+        svg.append("line")
+            .attr("x1", 0).attr("y1", 0)
+            .attr("x2", rScale(1) * Math.cos(angle))
+            .attr("y2", rScale(1) * Math.sin(angle))
+            .attr("stroke", "#444");
+            
+        svg.append("text")
+            .attr("x", x).attr("y", y)
+            .text(f.substr(0,4))
+            .style("text-anchor", "middle")
+            .style("fill", "#ccc")
+            .style("font-size", "10px");
+    });
+
+    // Draw Shape
+    const line = d3.lineRadial()
+        .angle((d,i) => i * angleSlice)
+        .radius(d => rScale(d))
+        .curve(d3.curveLinearClosed);
+
+    const dataPoints = features.map(f => means[f]);
+    
+    // Fill area
+    svg.append("path")
+        .datum(dataPoints)
+        .attr("d", line)
+        .style("fill", "var(--accent)")
+        .style("fill-opacity", 0.4)
+        .style("stroke", "var(--accent)");
+}
+
+function drawHistogram(data, feature, selector, unit) {
+    const container = d3.select(selector);
+    container.html("");
+    
+    const width = container.node().getBoundingClientRect().width - marginHist.left - marginHist.right;
+    const height = container.node().getBoundingClientRect().height - marginHist.top - marginHist.bottom;
+
+    const svg = container.append("svg")
+        .attr("width", width + marginHist.left + marginHist.right)
+        .attr("height", height + marginHist.top + marginHist.bottom)
+        .append("g")
+        .attr("transform", `translate(${marginHist.left},${marginHist.top})`);
+
+    const xExtent = d3.extent(data, d => d[feature]);
+    const xScale = d3.scaleLinear().domain(xExtent).range([0, width]);
+
+    const histogram = d3.histogram()
+        .value(d => d[feature])
+        .domain(xScale.domain())
+        .thresholds(xScale.ticks(20));
+
+    const bins = histogram(data);
+    const yScale = d3.scaleLinear()
+        .domain([0, d3.max(bins, d => d.length)])
+        .range([height, 0]);
+
+    svg.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(xScale).ticks(5).tickFormat(d => d + unit))
+        .style("color", "#888");
+
+    svg.selectAll("rect")
+        .data(bins)
+        .join("rect")
+        .attr("x", 1)
+        .attr("transform", d => `translate(${xScale(d.x0)}, ${yScale(d.length)})`)
+        .attr("width", d => Math.max(0, xScale(d.x1) - xScale(d.x0) - 1))
+        .attr("height", d => height - yScale(d.length))
+        .style("fill", "var(--accent)");
 }
 
 init();
