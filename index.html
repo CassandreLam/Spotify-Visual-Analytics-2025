@@ -38,21 +38,11 @@
         <div class="main-content">
             
             <div class="viz-area">
-                
-                <div id="map-wrapper">
-                    <div id="map-container"></div>
-                    
-                    <div id="legend-container" class="overlay-legend"></div>
-                    
-                    <div id="loading">
-                        <i class="fas fa-spinner fa-spin"></i> Loading 100k tracks...
-                    </div>
+                <div id="map-container">
+                    <div id="legend-container"></div>
+                    <div id="loading">Loading data...</div>
                 </div>
-
-                <div class="timeline-wrapper">
-                    <div class="timeline-header">Temporal Evolution (1960 - 2024)</div>
-                    <div id="timeline-container"></div>
-                </div>
+                <div id="timeline-container"></div>
             </div>
 
             <div id="sidebar-panel" class="panel">
@@ -84,14 +74,13 @@
             <span>Course: Visual Analytics</span>
             <span class="separator">|</span>
             <a href="https://github.com/cassandrelam/Spotify-Visual-Analytics-2025" target="_blank" id="github-link">
-    <i class="fab fa-github"></i> View Source Code
+                <i class="fab fa-github"></i> View Source Code
             </a>
             <span class="separator">|</span>
             <span>Data Source: Spotify API</span>
         </div>
     </footer>
 
-    <script src="main.js"></script>
+    <script defer src="main.js"></script>
 </body>
 </html>
-
