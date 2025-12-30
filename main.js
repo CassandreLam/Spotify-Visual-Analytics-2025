@@ -393,12 +393,18 @@ function highlightTimelineLayer(key) {
 
 function resetHighlight() {
     scatterSelection.attr("opacity", 0.6).attr("r", 2.5);
-    if(filteredData.length !== globalData.length) filterMapByTime(filteredData);
-    
-    const term = document.getElementById('search-input').value;
-    if(term.length > 0) handleSearch(term.toLowerCase());
+    if(timelineLayers) {
+        timelineLayers.attr("opacity", 0.85).attr("stroke", "#000").attr("stroke-width", 0.5);
+    }
 
-    if(timelineLayers) timelineLayers.attr("opacity", 0.85).attr("stroke", "#000").attr("stroke-width", 0.5);
+    const term = document.getElementById('search-input').value;
+    
+    if(term.length > 0) {
+        handleSearch(term.toLowerCase()); 
+    } else {
+        updateAnalytics(filteredData);
+    }
+    if(filteredData.length !== globalData.length) filterMapByTime(filteredData);
 }
 
 function filterMapByTime(data) {
@@ -408,3 +414,4 @@ function filterMapByTime(data) {
 
 
 init();
+
