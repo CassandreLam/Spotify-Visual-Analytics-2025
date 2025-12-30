@@ -32,39 +32,28 @@
                         <option value="cluster">AI Audio Clusters</option>
                     </select>
                 </div>
-
-                <div class="control-divider"></div>
-
-                <div class="control-item">
-                    <label><i class="far fa-calendar-alt"></i> Year:</label>
-                    <input type="number" id="input-year-start" min="1960" max="2024" value="1960">
-                    <span style="margin:0 4px">-</span>
-                    <input type="number" id="input-year-end" min="1960" max="2024" value="2024">
-                    <button id="btn-reset-time" title="Reset Timeline"><i class="fas fa-undo"></i></button>
-                </div>
             </div>
         </header>
 
-        <div class="workspace">
+        <div class="main-content">
             
-            <div class="left-column" id="left-col">
+            <div class="viz-area">
                 
-                <div id="map-panel" class="panel">
-                    <div class="overlay-legend" id="legend-container"></div>
-                    <div id="scatter-wrapper" class="chart-full"></div>
-                    <div id="loading">Loading Data...</div>
+                <div id="map-wrapper">
+                    <div id="map-container"></div>
+                    
+                    <div id="legend-container" class="overlay-legend"></div>
+                    
+                    <div id="loading">
+                        <i class="fas fa-spinner fa-spin"></i> Loading 100k tracks...
+                    </div>
                 </div>
 
-                <div class="resizer-vertical" id="resizer-vert"></div>
-
-                <div id="timeline-panel" class="panel">
-                    <div class="panel-label">Evolution Stream (Drag to Filter)</div>
-                    <div id="timeline-wrapper" class="chart-full"></div>
+                <div class="timeline-wrapper">
+                    <div class="timeline-header">Temporal Evolution (1960 - 2024)</div>
+                    <div id="timeline-container"></div>
                 </div>
-
             </div>
-
-            <div class="resizer-horizontal" id="resizer-horiz"></div>
 
             <div id="sidebar-panel" class="panel">
                 <div class="sidebar-header"><i class="fas fa-chart-bar"></i> Distributions</div>
@@ -94,7 +83,7 @@
             <span class="separator">|</span>
             <span>Course: Visual Analytics</span>
             <span class="separator">|</span>
-            <a href="https://cassandrelam.github.io/Spotify-Visual-Analytics-2025/" target="_blank" id="github-link">
+            <a href="#" id="github-link">
                 <i class="fab fa-github"></i> View Source Code
             </a>
             <span class="separator">|</span>
@@ -102,7 +91,6 @@
         </div>
     </footer>
 
-    <script type="module" src="main.js"></script>
+    <script src="main.js"></script>
 </body>
-
 </html>
