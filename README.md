@@ -1,4 +1,4 @@
-# Emotional and Structural Evolution of Modern Music (1970-2024)
+# Emotional and Structural Evolution of Modern Music (1970-2020)
 ### Visual Analytics Project - Group 25_5
 
 **Student:** Cassandre Lambert (2244308)
