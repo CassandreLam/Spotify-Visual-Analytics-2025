@@ -5,7 +5,7 @@
 **Course:** Visual Analytics (Fall 2025)
 
 ## Live Demo
-**[Click here to view the Interactive Dashboard](COLLE_ICI_LE_LIEN_DU_SITE_GITHUB_PAGES)**
+**[Click here to view the Interactive Dashboard]([COLLE_ICI_LE_LIEN_DU_SITE_GITHUB_PAGES](https://cassandrelam.github.io/Spotify-Visual-Analytics-2025/))**
 
 ## Project Description
 This project explores the evolution of Spotify musical genres over 50 years using dimensionality reduction (PCA) and clustering.
